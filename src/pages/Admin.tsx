@@ -7,6 +7,7 @@ import { IconLink, IconClock, IconUsers, IconCopy, IconCheck, IconLogout } from 
 
 const AUTH_KEY = 'classlink_admin_auth'
 const TUTOR_PASSWORD = import.meta.env.VITE_TUTOR_PASSWORD
+// TEMPORARY DEBUG — remove once the login mismatch is diagnosed. Logs length only, never the value.
 console.log('[DEBUG] VITE_TUTOR_PASSWORD length at load:', TUTOR_PASSWORD?.length)
 
 interface BookingRow {
@@ -23,7 +24,9 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    // TEMPORARY DEBUG — remove once the login mismatch is diagnosed. Logs lengths/match only, never the values.
     console.log('[DEBUG] entered password length:', password.length, '| expected password length:', TUTOR_PASSWORD?.length)
+    console.log('[DEBUG] passwords match:', password === TUTOR_PASSWORD)
     if (password === TUTOR_PASSWORD) {
       sessionStorage.setItem(AUTH_KEY, 'true')
       onSuccess()
