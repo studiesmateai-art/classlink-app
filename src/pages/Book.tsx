@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 import type { Tutor, TimeSlot } from '../types'
 import { formatDateLabel, formatTime, toDateKey } from '../lib/dates'
+import { Logo } from '../components/Logo'
 
 const DAYS_AHEAD = 14
 
@@ -56,17 +57,17 @@ export default function Book() {
     const bookedKeys = new Set((bookingsData ?? []).map((b) => `${b.slot_id}_${b.booking_date}`))
 
     const slots: AvailableSlot[] = []
-    for (let i = 0; i < DAYS_AHEAD; i++) {
-      const date = new Date(today)
-      date.setDate(date.getDate() + i)
-      const dateKey = toDateKey(date)
-      const dayOfWeek = date.getDay()
+    for (const slot of slotsData as TimeSlot[]) {
+      for (let i = 0; i < DAYS_AHEAD; i++) {
+        const date = new Date(today)
+        date.setDate(date.getDate() + i)
+        if (date.getDay() !== slot.day_of_week) continue
 
-      const dayMatches = (slotsData as TimeSlot[]).filter((s) => s.day_of_week === dayOfWeek)
-      for (const slot of dayMatches) {
+        const dateKey = toDateKey(date)
         if (!bookedKeys.has(`${slot.id}_${dateKey}`)) {
           slots.push({ dateKey, dateLabel: formatDateLabel(date), slot })
         }
+        break
       }
     }
     slots.sort((a, b) => {
@@ -139,18 +140,34 @@ export default function Book() {
 
   if (loading) {
     return (
-      <div className="page">
-        <p className="muted">Loading...</p>
+      <div className="app-bg">
+        <div className="glow-blob blob-1 fixed" />
+        <div className="glow-blob blob-2 fixed" />
+        <div className="page">
+          <div className="topbar" style={{ justifyContent: 'center' }}>
+            <Logo />
+          </div>
+          <p className="muted" style={{ textAlign: 'center' }}>
+            Loading...
+          </p>
+        </div>
       </div>
     )
   }
 
   if (tutor === null) {
     return (
-      <div className="page">
-        <div className="card">
-          <h1>Tutor not found</h1>
-          <p className="muted">This booking link is invalid.</p>
+      <div className="app-bg">
+        <div className="glow-blob blob-1 fixed" />
+        <div className="glow-blob blob-2 fixed" />
+        <div className="page">
+          <div className="topbar" style={{ justifyContent: 'center' }}>
+            <Logo />
+          </div>
+          <div className="card fade-slide-in" style={{ textAlign: 'center' }}>
+            <h1>Tutor not found</h1>
+            <p className="muted">This booking link is invalid.</p>
+          </div>
         </div>
       </div>
     )
@@ -158,13 +175,37 @@ export default function Book() {
 
   if (booked) {
     return (
-      <div className="page">
-        <div className="card" style={{ textAlign: 'center' }}>
-          <h1>Booked!</h1>
-          <p>
-            You're confirmed with {tutor?.name} on <strong>{booked.dateLabel}</strong> at{' '}
-            <strong>{formatTime(booked.slot.start_time)}</strong>.
-          </p>
+      <div className="app-bg">
+        <div className="glow-blob blob-1 fixed" />
+        <div className="glow-blob blob-2 fixed" />
+        <div className="page">
+          <div className="topbar" style={{ justifyContent: 'center' }}>
+            <Logo />
+          </div>
+          <div className="card booked-card" style={{ textAlign: 'center' }}>
+            <svg
+              className="big-check"
+              width="64"
+              height="64"
+              viewBox="0 0 44 44"
+              fill="none"
+              style={{ margin: '0 auto 16px' }}
+            >
+              <circle cx="22" cy="22" r="19" stroke="var(--success)" strokeWidth="3" />
+              <path
+                d="M13 22.5L19 28.5L31 15.5"
+                stroke="var(--success)"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <h1>Booked!</h1>
+            <p style={{ marginTop: 4 }}>
+              You're confirmed with {tutor?.name} on <strong>{booked.dateLabel}</strong> at{' '}
+              <strong>{formatTime(booked.slot.start_time)}</strong>.
+            </p>
+          </div>
         </div>
       </div>
     )
@@ -175,49 +216,69 @@ export default function Book() {
     return acc
   }, {})
 
+  let slotStagger = 0
+
   return (
-    <div className="page">
-      <h1>Book a session with {tutor?.name}</h1>
-      {tutor?.subject && <p className="muted">{tutor.subject}</p>}
-
-      <div className="card">
-        <h2>Your details</h2>
-        <div className="row">
-          <div className="field">
-            <label htmlFor="name">Name</label>
-            <input id="name" value={name} onChange={(e) => setName(e.target.value)} />
-          </div>
-          <div className="field">
-            <label htmlFor="contact">Email or phone</label>
-            <input id="contact" value={contact} onChange={(e) => setContact(e.target.value)} />
-          </div>
+    <div className="app-bg">
+      <div className="glow-blob blob-1 fixed" />
+      <div className="glow-blob blob-2 fixed" />
+      <div className="page stagger-parent">
+        <div className="topbar" style={{ justifyContent: 'center' }}>
+          <Logo />
         </div>
-        {formError && <p className="error">{formError}</p>}
-      </div>
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <h1>Book a session with {tutor?.name}</h1>
+          {tutor?.subject && (
+            <span className="pill" style={{ background: 'var(--accent-bg)', color: 'var(--accent-light)' }}>
+              {tutor.subject}
+            </span>
+          )}
+        </div>
 
-      <div className="card">
-        <h2>Available time slots</h2>
-        {availableSlots.length === 0 ? (
-          <p className="muted">No open slots in the next two weeks.</p>
-        ) : (
-          Object.entries(slotsByDate).map(([dateKey, slots]) => (
-            <div className="day-group" key={dateKey}>
-              <h3>{slots[0].dateLabel}</h3>
-              <div className="slot-grid">
-                {slots.map((s) => (
-                  <button
-                    key={s.slot.id}
-                    className="slot-btn"
-                    disabled={submitting}
-                    onClick={() => handleBookSlot(s)}
-                  >
-                    {formatTime(s.slot.start_time)}
-                  </button>
-                ))}
-              </div>
+        <div className="card">
+          <h2>Your details</h2>
+          <div className="row">
+            <div className="field">
+              <label htmlFor="name">Name</label>
+              <input id="name" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
-          ))
-        )}
+            <div className="field">
+              <label htmlFor="contact">Email or phone</label>
+              <input id="contact" value={contact} onChange={(e) => setContact(e.target.value)} />
+            </div>
+          </div>
+          {formError && <p className="error">{formError}</p>}
+        </div>
+
+        <div className="card">
+          <h2>Available time slots</h2>
+          {availableSlots.length === 0 ? (
+            <p className="muted">No open slots in the next two weeks.</p>
+          ) : (
+            Object.entries(slotsByDate).map(([dateKey, slots]) => (
+              <div className="day-group" key={dateKey}>
+                <h3>{slots[0].dateLabel}</h3>
+                <div className="slot-grid">
+                  {slots.map((s) => {
+                    const delay = Math.min(slotStagger * 40, 400)
+                    slotStagger += 1
+                    return (
+                      <button
+                        key={s.slot.id}
+                        className="slot-btn"
+                        style={{ animationDelay: `${delay}ms` }}
+                        disabled={submitting}
+                        onClick={() => handleBookSlot(s)}
+                      >
+                        {formatTime(s.slot.start_time)} - {formatTime(s.slot.end_time)}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </div>
   )

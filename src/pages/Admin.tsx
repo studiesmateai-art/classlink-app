@@ -1,7 +1,9 @@
-import { useEffect, useState, useCallback, type FormEvent } from 'react'
+import { useEffect, useState, useCallback, useRef, type FormEvent } from 'react'
 import { supabase } from '../supabaseClient'
 import type { Tutor } from '../types'
 import { DAY_NAMES, formatTime, toDateKey } from '../lib/dates'
+import { Logo } from '../components/Logo'
+import { IconLink, IconClock, IconUsers, IconCopy, IconCheck, IconLogout } from '../components/icons'
 
 const AUTH_KEY = 'classlink_admin_auth'
 const TUTOR_PASSWORD = import.meta.env.VITE_TUTOR_PASSWORD
@@ -31,11 +33,18 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   }
 
   return (
-    <div className="page">
-      <div className="card" style={{ maxWidth: 360, margin: '80px auto 0' }}>
+    <div className="auth-bg">
+      <div className="glow-blob blob-1" />
+      <div className="glow-blob blob-2" />
+      <div className="card fade-slide-in" style={{ maxWidth: 380, width: '100%', textAlign: 'center' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
+          <Logo size={44} showText={false} />
+        </div>
         <h1>ClassLink Admin</h1>
-        <p className="muted">Enter the tutor password to continue.</p>
-        <form onSubmit={handleSubmit}>
+        <p className="muted" style={{ marginBottom: 20 }}>
+          Enter the tutor password to continue.
+        </p>
+        <form onSubmit={handleSubmit} style={{ textAlign: 'left' }}>
           <div className="field">
             <label htmlFor="password">Password</label>
             <input
@@ -47,7 +56,7 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
             />
           </div>
           {error && <p className="error">{error}</p>}
-          <button type="submit" className="btn" style={{ width: '100%' }}>
+          <button type="submit" className="btn" style={{ width: '100%', justifyContent: 'center' }}>
             Log in
           </button>
         </form>
@@ -71,6 +80,17 @@ function Dashboard() {
   const [tutorLoading, setTutorLoading] = useState(true)
   const [bookings, setBookings] = useState<BookingRow[]>([])
   const [bookingsLoading, setBookingsLoading] = useState(true)
+  const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set())
+  const [headerPulse, setHeaderPulse] = useState(false)
+  const knownBookingIds = useRef<Set<string>>(new Set())
+  const firstBookingsLoad = useRef(true)
+  const isMounted = useRef(true)
+
+  useEffect(() => {
+    return () => {
+      isMounted.current = false
+    }
+  }, [])
 
   const [dayOfWeek, setDayOfWeek] = useState('1')
   const [startTime, setStartTime] = useState('09:00')
@@ -104,7 +124,28 @@ function Dashboard() {
       .eq('tutor_id', tutorId)
       .gte('booking_date', today)
       .order('booking_date', { ascending: true })
-    setBookings((data as unknown as BookingRow[]) ?? [])
+    const rows = (data as unknown as BookingRow[]) ?? []
+
+    if (firstBookingsLoad.current) {
+      firstBookingsLoad.current = false
+    } else {
+      const newlyArrivedIds = rows
+        .filter((r) => !knownBookingIds.current.has(r.id))
+        .map((r) => r.id)
+      if (newlyArrivedIds.length > 0 && isMounted.current) {
+        setHighlightIds(new Set(newlyArrivedIds))
+        setHeaderPulse(true)
+        setTimeout(() => {
+          if (isMounted.current) setHighlightIds(new Set())
+        }, 2000)
+        setTimeout(() => {
+          if (isMounted.current) setHeaderPulse(false)
+        }, 700)
+      }
+    }
+    knownBookingIds.current = new Set(rows.map((r) => r.id))
+
+    setBookings(rows)
     setBookingsLoading(false)
   }, [])
 
@@ -170,109 +211,176 @@ function Dashboard() {
 
   if (tutorLoading) {
     return (
-      <div className="page">
-        <p className="muted">Loading...</p>
+      <div className="app-bg">
+        <div className="glow-blob blob-1 fixed" />
+        <div className="glow-blob blob-2 fixed" />
+        <div className="page">
+          <div className="topbar">
+            <Logo />
+          </div>
+          <p className="muted">Loading...</p>
+        </div>
       </div>
     )
   }
 
   if (!tutor) {
     return (
-      <div className="page">
-        <div className="card">
-          <h1>No tutor profile found</h1>
-          <p className="muted">
-            Add a row to the <code>tutors</code> table in Supabase to get started.
-          </p>
+      <div className="app-bg">
+        <div className="glow-blob blob-1 fixed" />
+        <div className="glow-blob blob-2 fixed" />
+        <div className="page">
+          <div className="topbar">
+            <Logo />
+          </div>
+          <div className="card fade-slide-in">
+            <h1>No tutor profile found</h1>
+            <p className="muted">
+              Add a row to the <code>tutors</code> table in Supabase to get started.
+            </p>
+          </div>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="page">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1>ClassLink Admin</h1>
-        <button className="btn btn-outline" onClick={handleLogout}>
-          Log out
-        </button>
-      </div>
-      <p className="muted">Welcome, {tutor.name}</p>
-
-      <div className="card">
-        <h2>Your booking link</h2>
-        <p className="muted">Share this link with students so they can book a session.</p>
-        <div className="link-box">
-          <input readOnly value={bookingLink} onFocus={(e) => e.target.select()} />
-          <button className="btn" onClick={copyLink}>
-            {copied ? 'Copied!' : 'Copy'}
+    <div className="app-bg">
+      <div className="glow-blob blob-1 fixed" />
+      <div className="glow-blob blob-2 fixed" />
+      <div className="page stagger-parent">
+        <div className="topbar">
+          <Logo />
+          <button className="btn btn-outline" onClick={handleLogout}>
+            <IconLogout size={15} />
+            Log out
           </button>
         </div>
-      </div>
+        <p className="muted" style={{ marginBottom: 24 }}>
+          Welcome, {tutor.name}
+        </p>
 
-      <div className="card">
-        <h2>Add a weekly time slot</h2>
-        <form onSubmit={handleAddSlot}>
-          <div className="row">
-            <div className="field">
-              <label htmlFor="day">Day of week</label>
-              <select id="day" value={dayOfWeek} onChange={(e) => setDayOfWeek(e.target.value)}>
-                {DAY_NAMES.map((name, idx) => (
-                  <option key={idx} value={idx}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="start">Start time</label>
-              <input
-                id="start"
-                type="time"
-                value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="end">End time</label>
-              <input
-                id="end"
-                type="time"
-                value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
-              />
-            </div>
+        <div className="card">
+          <div className="card-title">
+            <span className="icon-badge">
+              <IconLink size={17} />
+            </span>
+            <h2>Your booking link</h2>
           </div>
-          {slotError && <p className="error">{slotError}</p>}
-          {slotSuccess && <p style={{ color: 'var(--success)', fontSize: 14 }}>Slot added!</p>}
-          <button type="submit" className="btn" disabled={slotSaving}>
-            {slotSaving ? 'Adding...' : 'Add slot'}
-          </button>
-        </form>
-      </div>
+          <p className="muted">Share this link with students so they can book a session.</p>
+          <div className="link-box">
+            <input readOnly value={bookingLink} onFocus={(e) => e.target.select()} />
+            <button className="btn" onClick={copyLink}>
+              <IconCopy size={15} />
+              {copied ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
+        </div>
 
-      <div className="card">
-        <h2>Upcoming bookings</h2>
-        {bookingsLoading ? (
-          <p className="muted">Loading...</p>
-        ) : bookings.length === 0 ? (
-          <p className="muted">No upcoming bookings yet.</p>
-        ) : (
-          bookings.map((b) => (
-            <div className="booking-item" key={b.id}>
-              <div>
-                <strong>{b.students?.name ?? 'Unknown student'}</strong>
-                <div className="muted">
-                  {b.booking_date}
-                  {b.time_slots
-                    ? ` · ${formatTime(b.time_slots.start_time)} - ${formatTime(b.time_slots.end_time)}`
-                    : ''}
-                </div>
+        <div className="card">
+          <div className="card-title">
+            <span className="icon-badge">
+              <IconClock size={17} />
+            </span>
+            <h2>Add a weekly time slot</h2>
+          </div>
+          <form onSubmit={handleAddSlot} style={{ marginTop: 18 }}>
+            <div className="row">
+              <div className="field">
+                <label htmlFor="day">Day of week</label>
+                <select id="day" value={dayOfWeek} onChange={(e) => setDayOfWeek(e.target.value)}>
+                  {DAY_NAMES.map((name, idx) => (
+                    <option key={idx} value={idx}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <span className="muted">{b.status}</span>
+              <div className="field">
+                <label htmlFor="start">Start time</label>
+                <input
+                  id="start"
+                  type="time"
+                  value={startTime}
+                  onChange={(e) => setStartTime(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="end">End time</label>
+                <input
+                  id="end"
+                  type="time"
+                  value={endTime}
+                  onChange={(e) => setEndTime(e.target.value)}
+                />
+              </div>
             </div>
-          ))
-        )}
+            {slotError && <p className="error">{slotError}</p>}
+            {slotSuccess && (
+              <p
+                className="slot-success-msg"
+                style={{ color: 'var(--success)', fontSize: 14, display: 'flex', alignItems: 'center' }}
+              >
+                <span className="confetti-wrap">
+                  <span className="check-badge">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="4 12 9 17 20 6" />
+                    </svg>
+                  </span>
+                  <span className="confetti-dot" />
+                  <span className="confetti-dot" />
+                  <span className="confetti-dot" />
+                  <span className="confetti-dot" />
+                  <span className="confetti-dot" />
+                  <span className="confetti-dot" />
+                </span>
+                Slot added!
+              </p>
+            )}
+            <button type="submit" className="btn" disabled={slotSaving}>
+              {slotSaving ? 'Adding...' : 'Add slot'}
+            </button>
+          </form>
+        </div>
+
+        <div className="card">
+          <div className="card-title">
+            <span className="icon-badge">
+              <IconUsers size={17} />
+            </span>
+            <h2>
+              <span className={headerPulse ? 'pulse-header' : undefined}>Upcoming bookings</span>
+            </h2>
+          </div>
+          <div style={{ marginTop: 16 }}>
+            {bookingsLoading ? (
+              <p className="muted">Loading...</p>
+            ) : bookings.length === 0 ? (
+              <p className="muted">No upcoming bookings yet.</p>
+            ) : (
+              bookings.map((b) => (
+                <div
+                  className={highlightIds.has(b.id) ? 'booking-item is-new' : 'booking-item'}
+                  key={b.id}
+                >
+                  <div>
+                    <strong>{b.students?.name ?? 'Unknown student'}</strong>
+                    <div className="muted">
+                      {b.booking_date}
+                      {b.time_slots
+                        ? ` · ${formatTime(b.time_slots.start_time)} - ${formatTime(b.time_slots.end_time)}`
+                        : ''}
+                    </div>
+                  </div>
+                  <span className="pill pill-success">
+                    <IconCheck size={11} />
+                    {b.status}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       </div>
     </div>
   )
