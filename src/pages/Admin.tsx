@@ -170,6 +170,31 @@ export default function Admin() {
   return <Dashboard tutor={tutor} onLogout={handleLogout} />
 }
 
+function playBookingNotificationSound() {
+  try {
+    const AudioContextClass = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+    const ctx = new AudioContextClass()
+    const oscillator = ctx.createOscillator()
+    const gain = ctx.createGain()
+    oscillator.connect(gain)
+    gain.connect(ctx.destination)
+    oscillator.type = 'sine'
+    oscillator.frequency.value = 880
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + 0.02)
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35)
+    oscillator.start()
+    oscillator.stop(ctx.currentTime + 0.35)
+    oscillator.onended = () => ctx.close()
+    console.log('[booking-notify] playBookingNotificationSound: AudioContext state =', ctx.state)
+    if (ctx.state === 'suspended') {
+      ctx.resume().then(() => console.log('[booking-notify] AudioContext resumed'))
+    }
+  } catch (err) {
+    console.log('[booking-notify] playBookingNotificationSound failed:', err)
+  }
+}
+
 function Dashboard({ tutor, onLogout }: { tutor: AuthedTutor; onLogout: () => void }) {
   const [bookings, setBookings] = useState<BookingRow[]>([])
   const [bookingsLoading, setBookingsLoading] = useState(true)
@@ -185,6 +210,14 @@ function Dashboard({ tutor, onLogout }: { tutor: AuthedTutor; onLogout: () => vo
     }
   }, [])
 
+  useEffect(() => {
+    if (tutor.is_admin) return
+    if (typeof Notification === 'undefined') return
+    if (Notification.permission === 'default') {
+      Notification.requestPermission()
+    }
+  }, [tutor.is_admin])
+
   const [dayOfWeek, setDayOfWeek] = useState('1')
   const [startTime, setStartTime] = useState('09:00')
   const [endTime, setEndTime] = useState('10:00')
@@ -198,15 +231,32 @@ function Dashboard({ tutor, onLogout }: { tutor: AuthedTutor; onLogout: () => vo
   const [slotsListError, setSlotsListError] = useState('')
   const [updatingSlotId, setUpdatingSlotId] = useState<string | null>(null)
   const [deletingSlotId, setDeletingSlotId] = useState<string | null>(null)
+  const timeSlotsRequestId = useRef(0)
 
   const loadTimeSlots = useCallback(async (tutorId: string) => {
+    const requestId = ++timeSlotsRequestId.current
     setTimeSlotsLoading(true)
-    const { data } = await supabase
+    console.log('[timeslots] loadTimeSlots: request', requestId, 'started for tutor', tutorId)
+    const { data, error } = await supabase
       .from('time_slots')
       .select('*')
       .eq('tutor_id', tutorId)
       .order('day_of_week', { ascending: true })
       .order('start_time', { ascending: true })
+
+    if (requestId !== timeSlotsRequestId.current) {
+      console.log('[timeslots] loadTimeSlots: request', requestId, 'is stale (latest is', timeSlotsRequestId.current, ') — ignoring response')
+      return
+    }
+
+    if (error) {
+      console.log('[timeslots] loadTimeSlots: request', requestId, 'FAILED — keeping existing list instead of clearing it:', error.message)
+      setSlotsListError(error.message)
+      setTimeSlotsLoading(false)
+      return
+    }
+
+    console.log('[timeslots] loadTimeSlots: request', requestId, 'resolved with', data?.length ?? 0, 'slot(s):', data?.map((s) => s.id))
     setTimeSlots((data as TimeSlot[]) ?? [])
     setTimeSlotsLoading(false)
   }, [])
@@ -229,10 +279,12 @@ function Dashboard({ tutor, onLogout }: { tutor: AuthedTutor; onLogout: () => vo
 
     if (firstBookingsLoad.current) {
       firstBookingsLoad.current = false
+      console.log('[booking-notify] loadBookings: first load, establishing baseline of', rows.length, 'booking(s) — no notification on this pass')
     } else {
       const newlyArrivedIds = rows
         .filter((r) => !knownBookingIds.current.has(r.id))
         .map((r) => r.id)
+      console.log('[booking-notify] loadBookings: reload triggered, newlyArrivedIds =', newlyArrivedIds)
       if (newlyArrivedIds.length > 0 && isMounted.current) {
         setHighlightIds(new Set(newlyArrivedIds))
         setHeaderPulse(true)
@@ -242,6 +294,24 @@ function Dashboard({ tutor, onLogout }: { tutor: AuthedTutor; onLogout: () => vo
         setTimeout(() => {
           if (isMounted.current) setHeaderPulse(false)
         }, 700)
+
+        console.log('[booking-notify] new booking(s) detected, about to play sound + show notification')
+        playBookingNotificationSound()
+
+        console.log('[booking-notify] typeof Notification =', typeof Notification, ', Notification.permission =', typeof Notification !== 'undefined' ? Notification.permission : 'n/a')
+        if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          const newRows = rows.filter((r) => newlyArrivedIds.includes(r.id))
+          newRows.forEach((row) => {
+            const studentName = row.students?.name ?? 'Unknown student'
+            const dayLabel = row.time_slots ? DAY_NAMES[row.time_slots.day_of_week] : ''
+            const timeLabel = row.time_slots ? formatTime(row.time_slots.start_time) : ''
+            const message = `New booking: ${studentName} - ${dayLabel} ${timeLabel}`.trim()
+            console.log('[booking-notify] calling new Notification() with message:', message)
+            new Notification(message)
+          })
+        } else {
+          console.log('[booking-notify] SKIPPED showing Notification — permission is not "granted"')
+        }
       }
     }
     knownBookingIds.current = new Set(rows.map((r) => r.id))
@@ -260,9 +330,14 @@ function Dashboard({ tutor, onLogout }: { tutor: AuthedTutor; onLogout: () => vo
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'bookings', filter: `tutor_id=eq.${tutor.id}` },
-        () => loadBookings(tutor.id),
+        (payload) => {
+          console.log('[booking-notify] postgres_changes event received:', payload.eventType, payload)
+          loadBookings(tutor.id)
+        },
       )
-      .subscribe()
+      .subscribe((status) => {
+        console.log('[booking-notify] Realtime channel status:', status)
+      })
 
     return () => {
       supabase.removeChannel(channel)
@@ -298,33 +373,66 @@ function Dashboard({ tutor, onLogout }: { tutor: AuthedTutor; onLogout: () => vo
   }
 
   async function handleSessionTypeChange(slotId: string, sessionType: SessionType) {
+    console.log('[timeslots] handleSessionTypeChange: dropdown changed for slot', slotId, '-> requesting update to', sessionType, '(this path never deletes)')
     setSlotsListError('')
     setUpdatingSlotId(slotId)
-    const previous = timeSlots
-    setTimeSlots((prev) => prev.map((s) => (s.id === slotId ? { ...s, session_type: sessionType } : s)))
+
+    // Remember only this row's previous value (not a snapshot of the whole array) so a
+    // failed update can revert this one row without clobbering any other concurrent edit.
+    const previousType = timeSlots.find((s) => s.id === slotId)?.session_type
+
+    setTimeSlots((prev) => {
+      const next = prev.map((s) => (s.id === slotId ? { ...s, session_type: sessionType } : s))
+      console.log('[timeslots] handleSessionTypeChange: optimistic update, count before =', prev.length, 'after =', next.length)
+      return next
+    })
 
     const { error } = await supabase.from('time_slots').update({ session_type: sessionType }).eq('id', slotId)
     setUpdatingSlotId(null)
+    console.log('[timeslots] handleSessionTypeChange: update response for slot', slotId, '- error:', error)
 
     if (error) {
-      setTimeSlots(previous)
+      if (previousType) {
+        setTimeSlots((prev) => prev.map((s) => (s.id === slotId ? { ...s, session_type: previousType } : s)))
+      }
       setSlotsListError(error.message)
     }
   }
 
   async function handleDeleteSlot(slotId: string) {
-    if (!window.confirm('Delete this time slot? Students will no longer be able to book it.')) return
+    console.log('[timeslots] handleDeleteSlot: trash button clicked for slot', slotId)
+    if (!window.confirm('Delete this time slot? Students will no longer be able to book it.')) {
+      console.log('[timeslots] handleDeleteSlot: delete cancelled by tutor')
+      return
+    }
 
     setSlotsListError('')
     setDeletingSlotId(slotId)
-    const previous = timeSlots
-    setTimeSlots((prev) => prev.filter((s) => s.id !== slotId))
+
+    // Remember only the removed row itself so a failed delete can restore just that row
+    // without clobbering any other concurrent edit made to the rest of the list.
+    const removedSlot = timeSlots.find((s) => s.id === slotId)
+
+    setTimeSlots((prev) => {
+      const next = prev.filter((s) => s.id !== slotId)
+      console.log('[timeslots] handleDeleteSlot: removing slot', slotId, 'from local list, count before =', prev.length, 'after =', next.length)
+      return next
+    })
 
     const { error } = await supabase.from('time_slots').delete().eq('id', slotId)
     setDeletingSlotId(null)
+    console.log('[timeslots] handleDeleteSlot: delete response for slot', slotId, '- error:', error)
 
     if (error) {
-      setTimeSlots(previous)
+      if (removedSlot) {
+        setTimeSlots((prev) =>
+          prev.some((s) => s.id === slotId)
+            ? prev
+            : [...prev, removedSlot].sort(
+                (a, b) => a.day_of_week - b.day_of_week || a.start_time.localeCompare(b.start_time),
+              ),
+        )
+      }
       setSlotsListError(error.message)
     }
   }
