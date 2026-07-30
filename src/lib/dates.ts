@@ -15,6 +15,11 @@ export function toDateKey(date: Date): string {
   return `${y}-${m}-${d}`
 }
 
+export function parseDateKey(dateKey: string): Date {
+  const [y, m, d] = dateKey.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+
 export function formatTime(time: string): string {
   const [hStr, mStr] = time.split(':')
   const h = Number(hStr)
@@ -26,6 +31,14 @@ export function formatTime(time: string): string {
 export function formatDateLabel(date: Date): string {
   return date.toLocaleDateString(undefined, {
     weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+export function formatFullDateLabel(date: Date): string {
+  return date.toLocaleDateString(undefined, {
+    weekday: 'long',
     month: 'short',
     day: 'numeric',
   })

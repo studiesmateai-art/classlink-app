@@ -4,9 +4,18 @@ export interface Tutor {
   subject: string | null
   contact: string | null
   password_hash: string | null
+  username: string | null
+  password: string | null
+  is_admin: boolean
   plan: string | null
   created_at: string
 }
+
+export type PublicTutor = Pick<Tutor, 'id' | 'name' | 'subject'>
+
+export type AuthedTutor = Pick<Tutor, 'id' | 'name' | 'subject' | 'contact' | 'is_admin'>
+
+export type TutorListItem = Pick<Tutor, 'id' | 'name' | 'subject' | 'contact'>
 
 export interface Student {
   id: string

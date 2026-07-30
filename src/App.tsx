@@ -5,9 +5,12 @@ import Book from './pages/Book'
 function App() {
   return (
     <Routes>
-      <Route path="/admin" element={<Admin />} />
+      <Route path="/login" element={<Admin />} />
+      <Route path="/admin" element={<Navigate to="/login" replace />} />
+      <Route path="/dashboard" element={<Admin />} />
+      <Route path="/admin-panel" element={<Admin />} />
       <Route path="/book/:tutorId" element={<Book />} />
-      <Route path="*" element={<Navigate to="/admin" replace />} />
+      <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   )
 }

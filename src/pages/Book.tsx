@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
-import type { Tutor, TimeSlot } from '../types'
-import { formatDateLabel, formatTime, toDateKey } from '../lib/dates'
+import type { PublicTutor, TimeSlot } from '../types'
+import { DAY_NAMES, formatDateLabel, formatTime, toDateKey } from '../lib/dates'
 import { Logo } from '../components/Logo'
 
 const DAYS_AHEAD = 14
@@ -10,12 +10,13 @@ const DAYS_AHEAD = 14
 interface AvailableSlot {
   dateKey: string
   dateLabel: string
+  weekdayLabel: string
   slot: TimeSlot
 }
 
 export default function Book() {
   const { tutorId } = useParams<{ tutorId: string }>()
-  const [tutor, setTutor] = useState<Tutor | null | undefined>(undefined)
+  const [tutor, setTutor] = useState<PublicTutor | null | undefined>(undefined)
   const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -30,7 +31,7 @@ export default function Book() {
     setLoading(true)
 
     const [{ data: tutorData }, { data: slotsData }] = await Promise.all([
-      supabase.from('tutors').select('*').eq('id', tutorId).maybeSingle(),
+      supabase.from('tutors').select('id, name, subject').eq('id', tutorId).maybeSingle(),
       supabase.from('time_slots').select('*').eq('tutor_id', tutorId).eq('is_recurring', true),
     ])
     setTutor(tutorData ?? null)
@@ -65,7 +66,7 @@ export default function Book() {
 
         const dateKey = toDateKey(date)
         if (!bookedKeys.has(`${slot.id}_${dateKey}`)) {
-          slots.push({ dateKey, dateLabel: formatDateLabel(date), slot })
+          slots.push({ dateKey, dateLabel: formatDateLabel(date), weekdayLabel: DAY_NAMES[date.getDay()], slot })
         }
         break
       }
@@ -257,7 +258,7 @@ export default function Book() {
           ) : (
             Object.entries(slotsByDate).map(([dateKey, slots]) => (
               <div className="day-group" key={dateKey}>
-                <h3>{slots[0].dateLabel}</h3>
+                <h3>{slots[0].weekdayLabel}</h3>
                 <div className="slot-grid">
                   {slots.map((s) => {
                     const delay = Math.min(slotStagger * 40, 400)
