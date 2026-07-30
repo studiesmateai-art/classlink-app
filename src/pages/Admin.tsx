@@ -1,10 +1,10 @@
 import { useEffect, useState, useCallback, useRef, type FormEvent } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
-import type { AuthedTutor } from '../types'
+import type { AuthedTutor, SessionType, TimeSlot } from '../types'
 import { DAY_NAMES, formatFullDateLabel, formatTime, parseDateKey, toDateKey } from '../lib/dates'
 import { Logo } from '../components/Logo'
-import { IconLink, IconClock, IconUsers, IconCopy, IconCheck, IconLogout } from '../components/icons'
+import { IconLink, IconClock, IconUsers, IconCopy, IconCheck, IconLogout, IconTrash } from '../components/icons'
 import { AdminPanel } from '../components/AdminPanel'
 
 const TUTOR_ID_KEY = 'classlink_tutor_id'
@@ -193,6 +193,29 @@ function Dashboard({ tutor, onLogout }: { tutor: AuthedTutor; onLogout: () => vo
   const [slotSuccess, setSlotSuccess] = useState(false)
   const [copied, setCopied] = useState(false)
 
+  const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([])
+  const [timeSlotsLoading, setTimeSlotsLoading] = useState(true)
+  const [slotsListError, setSlotsListError] = useState('')
+  const [updatingSlotId, setUpdatingSlotId] = useState<string | null>(null)
+  const [deletingSlotId, setDeletingSlotId] = useState<string | null>(null)
+
+  const loadTimeSlots = useCallback(async (tutorId: string) => {
+    setTimeSlotsLoading(true)
+    const { data } = await supabase
+      .from('time_slots')
+      .select('*')
+      .eq('tutor_id', tutorId)
+      .order('day_of_week', { ascending: true })
+      .order('start_time', { ascending: true })
+    setTimeSlots((data as TimeSlot[]) ?? [])
+    setTimeSlotsLoading(false)
+  }, [])
+
+  useEffect(() => {
+    if (tutor.is_admin) return
+    loadTimeSlots(tutor.id)
+  }, [tutor.id, tutor.is_admin, loadTimeSlots])
+
   const loadBookings = useCallback(async (tutorId: string) => {
     setBookingsLoading(true)
     const today = toDateKey(new Date())
@@ -270,6 +293,39 @@ function Dashboard({ tutor, onLogout }: { tutor: AuthedTutor; onLogout: () => vo
       setSlotError(error.message)
     } else {
       setSlotSuccess(true)
+      loadTimeSlots(tutor.id)
+    }
+  }
+
+  async function handleSessionTypeChange(slotId: string, sessionType: SessionType) {
+    setSlotsListError('')
+    setUpdatingSlotId(slotId)
+    const previous = timeSlots
+    setTimeSlots((prev) => prev.map((s) => (s.id === slotId ? { ...s, session_type: sessionType } : s)))
+
+    const { error } = await supabase.from('time_slots').update({ session_type: sessionType }).eq('id', slotId)
+    setUpdatingSlotId(null)
+
+    if (error) {
+      setTimeSlots(previous)
+      setSlotsListError(error.message)
+    }
+  }
+
+  async function handleDeleteSlot(slotId: string) {
+    if (!window.confirm('Delete this time slot? Students will no longer be able to book it.')) return
+
+    setSlotsListError('')
+    setDeletingSlotId(slotId)
+    const previous = timeSlots
+    setTimeSlots((prev) => prev.filter((s) => s.id !== slotId))
+
+    const { error } = await supabase.from('time_slots').delete().eq('id', slotId)
+    setDeletingSlotId(null)
+
+    if (error) {
+      setTimeSlots(previous)
+      setSlotsListError(error.message)
     }
   }
 
@@ -382,6 +438,53 @@ function Dashboard({ tutor, onLogout }: { tutor: AuthedTutor; onLogout: () => vo
                   {slotSaving ? 'Adding...' : 'Add slot'}
                 </button>
               </form>
+            </div>
+
+            <div className="card">
+              <div className="card-title">
+                <span className="icon-badge">
+                  <IconClock size={17} />
+                </span>
+                <h2>Your time slots</h2>
+              </div>
+              <div style={{ marginTop: 16 }}>
+                {slotsListError && <p className="error">{slotsListError}</p>}
+                {timeSlotsLoading ? (
+                  <p className="muted">Loading...</p>
+                ) : timeSlots.length === 0 ? (
+                  <p className="muted">No time slots yet — add one above.</p>
+                ) : (
+                  timeSlots.map((slot) => (
+                    <div className="booking-item" key={slot.id}>
+                      <div>
+                        <strong>{DAY_NAMES[slot.day_of_week]}</strong>
+                        <div className="muted">
+                          {formatTime(slot.start_time)} - {formatTime(slot.end_time)}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <select
+                          className="inline-select"
+                          value={slot.session_type}
+                          disabled={updatingSlotId === slot.id}
+                          onChange={(e) => handleSessionTypeChange(slot.id, e.target.value as SessionType)}
+                        >
+                          <option value="online">Online</option>
+                          <option value="physical">Physical</option>
+                        </select>
+                        <button
+                          className="icon-btn"
+                          disabled={deletingSlotId === slot.id}
+                          onClick={() => handleDeleteSlot(slot.id)}
+                          aria-label="Delete time slot"
+                        >
+                          <IconTrash size={15} />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
 
             <div className="card">

@@ -271,7 +271,21 @@ export default function Book() {
                         disabled={submitting}
                         onClick={() => handleBookSlot(s)}
                       >
-                        {formatTime(s.slot.start_time)} - {formatTime(s.slot.end_time)}
+                        <span style={{ display: 'block' }}>
+                          {formatTime(s.slot.start_time)} - {formatTime(s.slot.end_time)}
+                        </span>
+                        <span
+                          style={{
+                            display: 'block',
+                            fontSize: 11,
+                            fontWeight: 600,
+                            opacity: 0.7,
+                            marginTop: 3,
+                            textTransform: 'capitalize',
+                          }}
+                        >
+                          {s.slot.session_type}
+                        </span>
                       </button>
                     )
                   })}

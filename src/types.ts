@@ -27,6 +27,8 @@ export interface Student {
   created_at: string
 }
 
+export type SessionType = 'online' | 'physical'
+
 export interface TimeSlot {
   id: string
   tutor_id: string
@@ -34,6 +36,7 @@ export interface TimeSlot {
   start_time: string
   end_time: string
   is_recurring: boolean
+  session_type: SessionType
   created_at: string
 }
 
