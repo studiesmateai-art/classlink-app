@@ -44,19 +44,10 @@ export default function Book() {
 
     const today = new Date()
     today.setHours(0, 0, 0, 0)
-    const rangeStart = toDateKey(today)
-    const rangeEnd = new Date(today)
-    rangeEnd.setDate(rangeEnd.getDate() + DAYS_AHEAD - 1)
 
-    const { data: bookingsData } = await supabase
-      .from('bookings')
-      .select('slot_id, booking_date')
-      .eq('tutor_id', tutorId)
-      .gte('booking_date', rangeStart)
-      .lte('booking_date', toDateKey(rangeEnd))
-
-    const bookedKeys = new Set((bookingsData ?? []).map((b) => `${b.slot_id}_${b.booking_date}`))
-
+    // Slots represent Talha's general availability, not a single-seat booking — any number of
+    // different students can book the same slot/date, so this only ever picks each slot's next
+    // upcoming occurrence. It never excludes a date just because someone has already booked it.
     const slots: AvailableSlot[] = []
     for (const slot of slotsData as TimeSlot[]) {
       for (let i = 0; i < DAYS_AHEAD; i++) {
@@ -64,10 +55,7 @@ export default function Book() {
         date.setDate(date.getDate() + i)
         if (date.getDay() !== slot.day_of_week) continue
 
-        const dateKey = toDateKey(date)
-        if (!bookedKeys.has(`${slot.id}_${dateKey}`)) {
-          slots.push({ dateKey, dateLabel: formatDateLabel(date), weekdayLabel: DAY_NAMES[date.getDay()], slot })
-        }
+        slots.push({ dateKey: toDateKey(date), dateLabel: formatDateLabel(date), weekdayLabel: DAY_NAMES[date.getDay()], slot })
         break
       }
     }
@@ -120,6 +108,22 @@ export default function Book() {
       studentId = newStudent.id
     }
 
+    // Different students booking the same slot/date is expected and allowed. Only block this
+    // same student from booking the exact same slot/date twice (an accidental double-submit).
+    const { data: duplicateBooking } = await supabase
+      .from('bookings')
+      .select('id')
+      .eq('student_id', studentId)
+      .eq('slot_id', available.slot.id)
+      .eq('booking_date', available.dateKey)
+      .maybeSingle()
+
+    if (duplicateBooking) {
+      setFormError("You've already booked this slot.")
+      setSubmitting(false)
+      return
+    }
+
     const { error: bookingError } = await supabase.from('bookings').insert({
       student_id: studentId,
       tutor_id: tutorId,
@@ -131,8 +135,7 @@ export default function Book() {
     setSubmitting(false)
 
     if (bookingError) {
-      setFormError('That slot was just booked by someone else. Please pick another.')
-      loadAvailability()
+      setFormError('Something went wrong booking this slot. Please try again.')
       return
     }
 

@@ -4,7 +4,7 @@ import { supabase } from '../supabaseClient'
 import type { AuthedTutor, SessionType, TimeSlot } from '../types'
 import { DAY_NAMES, formatFullDateLabel, formatTime, parseDateKey, toDateKey } from '../lib/dates'
 import { Logo } from '../components/Logo'
-import { IconLink, IconClock, IconUsers, IconCopy, IconCheck, IconLogout, IconTrash } from '../components/icons'
+import { IconLink, IconClock, IconUsers, IconCopy, IconCheck, IconLogout } from '../components/icons'
 import { AdminPanel } from '../components/AdminPanel'
 
 const TUTOR_ID_KEY = 'classlink_tutor_id'
@@ -218,25 +218,24 @@ function Dashboard({ tutor, onLogout }: { tutor: AuthedTutor; onLogout: () => vo
     }
   }, [tutor.is_admin])
 
-  const [dayOfWeek, setDayOfWeek] = useState('1')
-  const [startTime, setStartTime] = useState('09:00')
-  const [endTime, setEndTime] = useState('10:00')
-  const [slotError, setSlotError] = useState('')
-  const [slotSaving, setSlotSaving] = useState(false)
-  const [slotSuccess, setSlotSuccess] = useState(false)
   const [copied, setCopied] = useState(false)
 
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([])
   const [timeSlotsLoading, setTimeSlotsLoading] = useState(true)
   const [slotsListError, setSlotsListError] = useState('')
   const [updatingSlotId, setUpdatingSlotId] = useState<string | null>(null)
-  const [deletingSlotId, setDeletingSlotId] = useState<string | null>(null)
   const timeSlotsRequestId = useRef(0)
+  const hasLoadedTimeSlotsOnce = useRef(false)
 
   const loadTimeSlots = useCallback(async (tutorId: string) => {
     const requestId = ++timeSlotsRequestId.current
-    setTimeSlotsLoading(true)
-    console.log('[timeslots] loadTimeSlots: request', requestId, 'started for tutor', tutorId)
+    // Only show the "Loading..." placeholder on the very first fetch. Refetches triggered by a
+    // toggle keep the current rows on screen until the fresh data replaces them, so re-fetching
+    // never blanks the list the tutor is looking at.
+    if (!hasLoadedTimeSlotsOnce.current) {
+      setTimeSlotsLoading(true)
+    }
+
     const { data, error } = await supabase
       .from('time_slots')
       .select('*')
@@ -244,21 +243,19 @@ function Dashboard({ tutor, onLogout }: { tutor: AuthedTutor; onLogout: () => vo
       .order('day_of_week', { ascending: true })
       .order('start_time', { ascending: true })
 
-    if (requestId !== timeSlotsRequestId.current) {
-      console.log('[timeslots] loadTimeSlots: request', requestId, 'is stale (latest is', timeSlotsRequestId.current, ') — ignoring response')
-      return
-    }
+    // A newer loadTimeSlots call has since started — ignore this now-outdated response so an
+    // out-of-order network reply can never overwrite fresher data.
+    if (requestId !== timeSlotsRequestId.current) return
 
     if (error) {
-      console.log('[timeslots] loadTimeSlots: request', requestId, 'FAILED — keeping existing list instead of clearing it:', error.message)
       setSlotsListError(error.message)
       setTimeSlotsLoading(false)
       return
     }
 
-    console.log('[timeslots] loadTimeSlots: request', requestId, 'resolved with', data?.length ?? 0, 'slot(s):', data?.map((s) => s.id))
     setTimeSlots((data as TimeSlot[]) ?? [])
     setTimeSlotsLoading(false)
+    hasLoadedTimeSlotsOnce.current = true
   }, [])
 
   useEffect(() => {
@@ -344,97 +341,24 @@ function Dashboard({ tutor, onLogout }: { tutor: AuthedTutor; onLogout: () => vo
     }
   }, [tutor.id, tutor.is_admin, loadBookings])
 
-  async function handleAddSlot(e: FormEvent) {
-    e.preventDefault()
-    setSlotError('')
-    setSlotSuccess(false)
-
-    if (startTime >= endTime) {
-      setSlotError('End time must be after start time.')
-      return
-    }
-
-    setSlotSaving(true)
-    const { error } = await supabase.from('time_slots').insert({
-      tutor_id: tutor.id,
-      day_of_week: Number(dayOfWeek),
-      start_time: startTime,
-      end_time: endTime,
-      is_recurring: true,
-    })
-    setSlotSaving(false)
-
-    if (error) {
-      setSlotError(error.message)
-    } else {
-      setSlotSuccess(true)
-      loadTimeSlots(tutor.id)
-    }
-  }
-
+  // This handler never touches `timeSlots` directly. It only writes the single changed field to
+  // Supabase, then calls loadTimeSlots(), which re-fetches this tutor's full slot list and
+  // replaces the local array wholesale. The database is the only source of truth for what's
+  // displayed — there is no local patch/merge logic that could drop or duplicate a row.
   async function handleSessionTypeChange(slotId: string, sessionType: SessionType) {
-    console.log('[timeslots] handleSessionTypeChange: dropdown changed for slot', slotId, '-> requesting update to', sessionType, '(this path never deletes)')
     setSlotsListError('')
     setUpdatingSlotId(slotId)
 
-    // Remember only this row's previous value (not a snapshot of the whole array) so a
-    // failed update can revert this one row without clobbering any other concurrent edit.
-    const previousType = timeSlots.find((s) => s.id === slotId)?.session_type
-
-    setTimeSlots((prev) => {
-      const next = prev.map((s) => (s.id === slotId ? { ...s, session_type: sessionType } : s))
-      console.log('[timeslots] handleSessionTypeChange: optimistic update, count before =', prev.length, 'after =', next.length)
-      return next
-    })
-
     const { error } = await supabase.from('time_slots').update({ session_type: sessionType }).eq('id', slotId)
-    setUpdatingSlotId(null)
-    console.log('[timeslots] handleSessionTypeChange: update response for slot', slotId, '- error:', error)
 
     if (error) {
-      if (previousType) {
-        setTimeSlots((prev) => prev.map((s) => (s.id === slotId ? { ...s, session_type: previousType } : s)))
-      }
       setSlotsListError(error.message)
-    }
-  }
-
-  async function handleDeleteSlot(slotId: string) {
-    console.log('[timeslots] handleDeleteSlot: trash button clicked for slot', slotId)
-    if (!window.confirm('Delete this time slot? Students will no longer be able to book it.')) {
-      console.log('[timeslots] handleDeleteSlot: delete cancelled by tutor')
+      setUpdatingSlotId(null)
       return
     }
 
-    setSlotsListError('')
-    setDeletingSlotId(slotId)
-
-    // Remember only the removed row itself so a failed delete can restore just that row
-    // without clobbering any other concurrent edit made to the rest of the list.
-    const removedSlot = timeSlots.find((s) => s.id === slotId)
-
-    setTimeSlots((prev) => {
-      const next = prev.filter((s) => s.id !== slotId)
-      console.log('[timeslots] handleDeleteSlot: removing slot', slotId, 'from local list, count before =', prev.length, 'after =', next.length)
-      return next
-    })
-
-    const { error } = await supabase.from('time_slots').delete().eq('id', slotId)
-    setDeletingSlotId(null)
-    console.log('[timeslots] handleDeleteSlot: delete response for slot', slotId, '- error:', error)
-
-    if (error) {
-      if (removedSlot) {
-        setTimeSlots((prev) =>
-          prev.some((s) => s.id === slotId)
-            ? prev
-            : [...prev, removedSlot].sort(
-                (a, b) => a.day_of_week - b.day_of_week || a.start_time.localeCompare(b.start_time),
-              ),
-        )
-      }
-      setSlotsListError(error.message)
-    }
+    await loadTimeSlots(tutor.id)
+    setUpdatingSlotId(null)
   }
 
   const bookingLink = `${window.location.origin}/book/${tutor.id}`
@@ -487,110 +411,40 @@ function Dashboard({ tutor, onLogout }: { tutor: AuthedTutor; onLogout: () => vo
                 <span className="icon-badge">
                   <IconClock size={17} />
                 </span>
-                <h2>Add a weekly time slot</h2>
-              </div>
-              <form onSubmit={handleAddSlot} style={{ marginTop: 18 }}>
-                <div className="row">
-                  <div className="field">
-                    <label htmlFor="day">Day of week</label>
-                    <select id="day" value={dayOfWeek} onChange={(e) => setDayOfWeek(e.target.value)}>
-                      {DAY_NAMES.map((name, idx) => (
-                        <option key={idx} value={idx}>
-                          {name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="field">
-                    <label htmlFor="start">Start time</label>
-                    <input
-                      id="start"
-                      type="time"
-                      value={startTime}
-                      onChange={(e) => setStartTime(e.target.value)}
-                    />
-                  </div>
-                  <div className="field">
-                    <label htmlFor="end">End time</label>
-                    <input
-                      id="end"
-                      type="time"
-                      value={endTime}
-                      onChange={(e) => setEndTime(e.target.value)}
-                    />
-                  </div>
-                </div>
-                {slotError && <p className="error">{slotError}</p>}
-                {slotSuccess && (
-                  <p
-                    className="slot-success-msg"
-                    style={{ color: 'var(--success)', fontSize: 14, display: 'flex', alignItems: 'center' }}
-                  >
-                    <span className="confetti-wrap">
-                      <span className="check-badge">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="4 12 9 17 20 6" />
-                        </svg>
-                      </span>
-                      <span className="confetti-dot" />
-                      <span className="confetti-dot" />
-                      <span className="confetti-dot" />
-                      <span className="confetti-dot" />
-                      <span className="confetti-dot" />
-                      <span className="confetti-dot" />
-                    </span>
-                    Slot added!
-                  </p>
-                )}
-                <button type="submit" className="btn" disabled={slotSaving}>
-                  {slotSaving ? 'Adding...' : 'Add slot'}
-                </button>
-              </form>
-            </div>
-
-            <div className="card">
-              <div className="card-title">
-                <span className="icon-badge">
-                  <IconClock size={17} />
-                </span>
                 <h2>Your time slots</h2>
               </div>
+              <p className="muted">
+                Tap Online / Physical to change how a session is held. Adding, removing, or
+                rescheduling slots is handled directly in Supabase for now.
+              </p>
               <div style={{ marginTop: 16 }}>
                 {slotsListError && <p className="error">{slotsListError}</p>}
                 {timeSlotsLoading ? (
                   <p className="muted">Loading...</p>
                 ) : timeSlots.length === 0 ? (
-                  <p className="muted">No time slots yet — add one above.</p>
+                  <p className="muted">No time slots configured yet.</p>
                 ) : (
-                  timeSlots.map((slot) => (
-                    <div className="booking-item" key={slot.id}>
-                      <div>
-                        <strong>{DAY_NAMES[slot.day_of_week]}</strong>
-                        <div className="muted">
-                          {formatTime(slot.start_time)} - {formatTime(slot.end_time)}
+                  timeSlots.map((slot) => {
+                    const isOnline = slot.session_type === 'online'
+                    return (
+                      <div className="booking-item" key={slot.id}>
+                        <div>
+                          <strong>{DAY_NAMES[slot.day_of_week]}</strong>
+                          <div className="muted">
+                            {formatTime(slot.start_time)} - {formatTime(slot.end_time)}
+                          </div>
                         </div>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <select
-                          className="inline-select"
-                          value={slot.session_type}
-                          disabled={updatingSlotId === slot.id}
-                          onChange={(e) => handleSessionTypeChange(slot.id, e.target.value as SessionType)}
-                        >
-                          <option value="online">Online</option>
-                          <option value="physical">Physical</option>
-                        </select>
                         <button
-                          className="icon-btn"
-                          disabled={deletingSlotId === slot.id}
-                          onClick={() => handleDeleteSlot(slot.id)}
-                          aria-label="Delete time slot"
+                          type="button"
+                          className={`session-toggle ${isOnline ? 'session-toggle-online' : 'session-toggle-physical'}`}
+                          disabled={updatingSlotId === slot.id}
+                          onClick={() => handleSessionTypeChange(slot.id, isOnline ? 'physical' : 'online')}
                         >
-                          <IconTrash size={15} />
+                          {updatingSlotId === slot.id ? 'Saving...' : isOnline ? 'Online' : 'Physical'}
                         </button>
                       </div>
-                    </div>
-                  ))
+                    )
+                  })
                 )}
               </div>
             </div>
